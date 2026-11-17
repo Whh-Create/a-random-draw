@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="不重复的随机点名工具：输入总人数，滚动抽号，抽过的号码自动存档。">
+<title>随机点名</title>
+<style>
+  * { box-sizing: border-box; }
+
+  :root {
+    --bg: #f6f8fc;
+    --card: #ffffff;
+    --ink: #171a21;
+    --muted: #77808f;
+    --line: #e8ecf4;
+    --accent: #3b6fe0;
+    --accent-soft: #eaf0ff;
+    --danger: #e2725b;
+  }
+
+  html, body { height: 100%; }
+
+  body {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+    color: var(--ink);
+    background:
+      radial-gradient(1000px 520px at 8% -12%, #e9f0ff 0%, rgba(233,240,255,0) 60%),
+      radial-gradient(820px 480px at 108% 112%, #e6f7fb 0%, rgba(230,247,251,0) 62%),
+      var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .app {
+    width: min(1160px, 100%);
+    height: min(740px, calc(100vh - 48px));
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    gap: 20px;
+  }
+
+  .stage,
+  .archive {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    box-shadow: 0 18px 40px -28px rgba(24, 40, 80, .35), 0 2px 6px rgba(24, 40, 80, .04);
+  }
+
+  /* ---------- 左侧主区 ---------- */
+  .stage {
+    display: flex;
+    flex-direction: column;
+    padding: 34px;
+    min-width: 0;
+  }
+
+  .head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+  .head h1 {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: .02em;
+  }
+
+  .status {
+    font-size: 13.5px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .status.done { color: #1f9d63; font-weight: 600; }
+
+  .display-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+  }
+
+  .display {
+    font-size: clamp(84px, 14vw, 180px);
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -.04em;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    user-select: none;
+    transition: color .25s ease;
+  }
+
+  .display.rolling { color: #9fb0d4; }
+
+  @keyframes pop {
+    0%   { transform: scale(1); }
+    42%  { transform: scale(1.1); }
+    100% { transform: scale(1); }
+  }
+  .display.pop { animation: pop .4s cubic-bezier(.34, 1.56, .64, 1); }
+
+  .controls {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding-top: 8px;
+  }
+
+  .field { display: flex; flex-direction: column; gap: 7px; }
+
+  .field span { font-size: 12.5px; color: var(--muted); padding-left: 2px; }
+
+  .field input {
+    width: 168px;
+    padding: 13px 15px;
+    font-family: inherit;
+    font-size: 16px;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    background: #fbfcfe;
+    border: 1px solid var(--line);
+    border-radius: 13px;
+    outline: none;
+    transition: border-color .15s, box-shadow .15s, background .15s;
+  }
+
+  .field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+  .field input:disabled { background: #f4f6fa; color: var(--muted); cursor: not-allowed; }
+
+  .field input.invalid {
+    border-color: var(--danger);
+    box-shadow: 0 0 0 3px rgba(226, 114, 91, .15);
+    animation: shake .32s ease;
+  }
+
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25%      { transform: translateX(-5px); }
+    75%      { transform: translateX(5px); }
+  }
+
+  .btn-primary {
+    padding: 14px 44px;
+    font-family: inherit;
+    font-size: 17px;
+    font-weight: 600;
+    color: #fff;
+    background: linear-gradient(180deg, #4b7ceb, var(--accent));
+    border: none;
+    border-radius: 13px;
+    cursor: pointer;
+    box-shadow: 0 10px 22px -12px rgba(59, 111, 224, .9);
+    transition: transform .12s ease, box-shadow .2s, opacity .2s, background .2s;
+  }
+
+  .btn-primary:hover:not(:disabled) { transform: translateY(-1px); }
+  .btn-primary:active:not(:disabled) { transform: translateY(1px); }
+  .btn-primary:disabled {
+    background: #aab8d5;
+    box-shadow: none;
+    cursor: not-allowed;
+    opacity: .75;
+  }
+
+  /* ---------- 右侧存档 ---------- */
+  .archive {
+    display: flex;
+    flex-direction: column;
+    padding: 22px 20px;
+    min-height: 0;
+  }
+
+  .archive-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .archive-head h2 { margin: 0; font-size: 15px; font-weight: 700; }
+
+  .counter {
+    margin-left: auto;
+    font-size: 12.5px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .btn-ghost {
+    padding: 6px 12px;
+    font-family: inherit;
+    font-size: 12.5px;
+    color: var(--muted);
+    background: #f5f7fb;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    cursor: pointer;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+
+  .btn-ghost:hover { color: var(--ink); background: #eef2f9; border-color: #dbe2ee; }
+  .btn-ghost:disabled { opacity: .45; cursor: not-allowed; }
+
+  .list {
+    list-style: none;
+    margin: 14px 0 0;
+    padding: 0 4px 0 0;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .list::-webkit-scrollbar { width: 6px; }
+  .list::-webkit-scrollbar-thumb { background: #dbe2ee; border-radius: 3px; }
+  .list::-webkit-scrollbar-track { background: transparent; }
+
+  .list li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: #f8fafd;
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    flex: none;
+  }
+
+  .list li.new { animation: slideIn .3s ease; border-color: #c8d8f7; background: #f4f8ff; }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .list .idx {
+    width: 22px;
+    height: 22px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    font-size: 11px;
+    color: var(--muted);
+    background: #eceff6;
+    border-radius: 50%;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .list li.new .idx { background: #dbe7fd; color: var(--accent); }
+
+  .list .num {
+    font-size: 17px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .list li.empty {
+    justify-content: center;
+    padding: 26px 14px;
+    color: #a5aebd;
+    font-size: 13px;
+    background: transparent;
+    border-style: dashed;
+  }
+
+  @media (max-width: 880px) {
+    body { align-items: flex-start; padding: 16px; }
+    .app { grid-template-columns: 1fr; height: auto; }
+    .stage { padding: 26px 20px; }
+    .archive { max-height: 380px; }
+    .display-wrap { padding: 28px 0; min-height: 160px; }
+    .field input { width: 140px; }
+    .btn-primary { padding: 14px 34px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <main class="stage">
+    <div class="head">
+      <h1>随机点名</h1>
+      <div class="status" id="status">设置总人数，点击开始</div>
+    </div>
+
+    <div class="display-wrap">
+      <div class="display" id="display">?</div>
+    </div>
+
+    <div class="controls">
+      <label class="field">
+        <span>总人数</span>
+        <input id="totalInput" type="number" min="1" max="9999" placeholder="例如 30" inputmode="numeric" autocomplete="off">
+      </label>
+      <button id="startBtn" class="btn-primary" type="button">开始</button>
+    </div>
+  </main>
+
+  <aside class="archive">
+    <div class="archive-head">
+      <h2>存档</h2>
+      <span class="counter" id="counter">0 / 0</span>
+      <button id="resetBtn" class="btn-ghost" type="button">重置</button>
+    </div>
+    <ul class="list" id="list"></ul>
+  </aside>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var STORAGE_KEY = 'random-call-record-v1';
+  var DURATION = 500;
+
+  var el = {
+    total: document.getElementById('totalInput'),
+    start: document.getElementById('startBtn'),
+    reset: document.getElementById('resetBtn'),
+    display: document.getElementById('display'),
+    status: document.getElementById('status'),
+    list: document.getElementById('list'),
+    counter: document.getElementById('counter')
+  };
+
+  var total = 0;
+  var drawn = [];
+  var rolling = false;
+
+  /* ---------- 存档持久化 ---------- */
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ total: total, drawn: drawn }));
+    } catch (e) { /* 隐私模式下忽略 */ }
+  }
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      var data = JSON.parse(raw);
+      if (!data || !Number.isInteger(data.total) || data.total < 1) return;
+      total = data.total;
+      drawn = Array.isArray(data.drawn)
+        ? data.drawn.filter(function (n) { return Number.isInteger(n) && n >= 1 && n <= total; })
+        : [];
+      el.total.value = String(total);
+    } catch (e) {
+      total = 0;
+      drawn = [];
+    }
+  }
+
+  /* ---------- 工具 ---------- */
+  function pool() {
+    var used = {};
+    for (var k = 0; k < drawn.length; k++) used[drawn[k]] = true;
+    var out = [];
+    for (var i = 1; i <= total; i++) if (!used[i]) out.push(i);
+    return out;
+  }
+
+  function pick(arr) {
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  function setStatus(text, done) {
+    el.status.textContent = text;
+    el.status.classList.toggle('done', !!done);
+  }
+
+  /* ---------- 渲染 ---------- */
+  function renderList(highlight) {
+    el.list.textContent = '';
+
+    if (drawn.length === 0) {
+      var empty = document.createElement('li');
+      empty.className = 'empty';
+      empty.textContent = '还没有抽签记录';
+      el.list.appendChild(empty);
+      return;
+    }
+
+    for (var i = drawn.length - 1; i >= 0; i--) {
+      var li = document.createElement('li');
+      if (highlight !== undefined && i === drawn.length - 1 && drawn[i] === highlight) {
+        li.className = 'new';
+      }
+      var idx = document.createElement('span');
+      idx.className = 'idx';
+      idx.textContent = String(i + 1);
+      var num = document.createElement('span');
+      num.className = 'num';
+      num.textContent = String(drawn[i]);
+      li.appendChild(idx);
+      li.appendChild(num);
+      el.list.appendChild(li);
+    }
+  }
+
+  function refreshStatus() {
+    if (rolling) return;
+    if (total === 0) return setStatus('设置总人数，点击开始');
+    if (drawn.length >= total) return setStatus('已完成抽签', true);
+    if (drawn.length === 0) return setStatus('共 ' + total + ' 人，点击开始抽签');
+    setStatus('已抽 ' + drawn.length + ' / ' + total + '，还剩 ' + (total - drawn.length) + ' 人');
+  }
+
+  function syncUI() {
+    var done = total > 0 && drawn.length >= total;
+
+    el.counter.textContent = (total > 0 ? drawn.length : 0) + ' / ' + (total > 0 ? total : 0);
+    el.total.disabled = total > 0 || rolling;
+    el.reset.disabled = rolling;
+    el.start.disabled = rolling || done;
+    el.start.textContent = rolling ? '抽签中' : (done ? '已完成' : '开始');
+  }
+
+  /* ---------- 抽签 ---------- */
+  function startDraw() {
+    if (rolling) return;
+
+    if (total === 0) {
+      var n = parseInt(el.total.value, 10);
+      if (!Number.isInteger(n) || n < 1 || n > 9999) {
+        el.total.classList.remove('invalid');
+        void el.total.offsetWidth;
+        el.total.classList.add('invalid');
+        el.total.focus();
+        setStatus('请输入 1 - 9999 之间的总人数');
+        return;
+      }
+      total = n;
+      drawn = [];
+      el.total.value = String(n);
+      save();
+    }
+
+    var candidates = pool();
+    if (candidates.length === 0) {
+      syncUI();
+      setStatus('已完成抽签', true);
+      return;
+    }
+
+    var target = pick(candidates);
+
+    rolling = true;
+    syncUI();
+    setStatus('抽签中…');
+    el.display.classList.remove('pop');
+    el.display.classList.add('rolling');
+
+    var start = performance.now();
+    var lastSwap = -Infinity;
+
+    function tick(now) {
+      var elapsed = now - start;
+
+      if (elapsed >= DURATION) {
+        el.display.classList.remove('rolling');
+        el.display.textContent = String(target);
+        finish(target);
+        return;
+      }
+
+      var gap = 40 + (elapsed / DURATION) * 85;
+      if (elapsed - lastSwap >= gap) {
+        lastSwap = elapsed;
+        el.display.textContent = String(pick(candidates));
+      }
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  function finish(n) {
+    drawn.push(n);
+    rolling = false;
+    save();
+
+    renderList(n);
+    syncUI();
+    refreshStatus();
+
+    el.display.classList.add('pop');
+    el.list.scrollTop = 0;
+  }
+
+  function reset() {
+    if (rolling) return;
+
+    total = 0;
+    drawn = [];
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* ignore */ }
+
+    el.total.value = '';
+    el.total.disabled = false;
+    el.display.textContent = '?';
+    el.display.classList.remove('pop', 'rolling');
+
+    syncUI();
+    renderList();
+    refreshStatus();
+    el.total.focus();
+  }
+
+  /* ---------- 事件 ---------- */
+  el.start.addEventListener('click', startDraw);
+  el.reset.addEventListener('click', reset);
+
+  el.total.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      startDraw();
+    }
+  });
+
+  el.total.addEventListener('input', function () {
+    el.total.classList.remove('invalid');
+  });
+
+  /* ---------- 初始化 ---------- */
+  load();
+  syncUI();
+  renderList();
+  refreshStatus();
+
+  if (drawn.length > 0) {
+    el.display.textContent = String(drawn[drawn.length - 1]);
+  }
+})();
+</script>
+</body>
+</html>
